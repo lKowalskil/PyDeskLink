@@ -4,7 +4,7 @@ import cv2
 import pickle
 from PyQt5.QtWidgets import (QLineEdit, QWidget, 
                              QPushButton, QToolTip, 
-                             QLabel,)
+                             QLabel, QVBoxLayout)
 from PyQt5.QtGui import QFont
 from .connectionModule import (wait_for_connection, get_file_and_write,
                                send_string_into_connection, read_string_from_connection)
@@ -19,74 +19,78 @@ class Server(QWidget):
         QToolTip.setFont(QFont('SansSerif', 10))
         self.setToolTip('Server')
 
-        self.btn_T1082 = QPushButton('System Information', self)
-        self.btn_T1082.clicked.connect(self.gather_system_info)
-        self.btn_T1082.resize(self.btn_T1082.sizeHint())
-        self.btn_T1082.move(50, 50)
-        self.btn_T1059 = QPushButton('CMD', self)
-        self.btn_T1059.clicked.connect(self.command_line_interface)
-        self.btn_T1059.resize(self.btn_T1059.sizeHint())
-        self.btn_T1059.move(50, 80)
-        self.btn_T1083 = QPushButton('File And Directory Discovery', self)
-        self.btn_T1083.clicked.connect(self.file_and_directory_discovery)
-        self.btn_T1083.resize(self.btn_T1083.sizeHint())
-        self.btn_T1083.move(50, 110)
-        self.btn_T1105 = QPushButton('Remote File Copy', self)
-        self.btn_T1105.clicked.connect(self.remote_file_copy)
-        self.btn_T1105.resize(self.btn_T1105.sizeHint())
-        self.btn_T1105.move(50, 140)
-        self.btn_T1107 = QPushButton('File Deletion', self)
-        self.btn_T1107.clicked.connect(self.file_deletion)
-        self.btn_T1107.resize(self.btn_T1107.sizeHint())
-        self.btn_T1107.move(50, 170)
-        self.btn_T1057 = QPushButton('Process Discovery', self)
-        self.btn_T1057.clicked.connect(self.process_discovery)
-        self.btn_T1057.resize(self.btn_T1057.sizeHint())
-        self.btn_T1057.move(50, 200)
-        self.btn_T1056 = QPushButton('Input Capture', self)
-        self.btn_T1056.clicked.connect(self.input_capture)
-        self.btn_T1056.resize(self.btn_T1056.sizeHint())
-        self.btn_T1056.move(50, 230)
-        self.btn_T1115 = QPushButton('Clipboard Data', self)
-        self.btn_T1115.clicked.connect(self.clipboard_data)
-        self.btn_T1115.resize(self.btn_T1115.sizeHint())
-        self.btn_T1115.move(50, 260)
-        self.btn_T1113 = QPushButton('Screen Capture', self)
-        self.btn_T1113.clicked.connect(self.screen_capture)
-        self.btn_T1113.resize(self.btn_T1113.sizeHint())
-        self.btn_T1113.move(50, 290)
-        self.btn_T1123 = QPushButton('Audio Capture', self)
-        self.btn_T1123.clicked.connect(self.audio_capture)
-        self.btn_T1123.resize(self.btn_T1123.sizeHint())
-        self.btn_T1123.move(50, 320)
-        self.btn_T1125 = QPushButton('Video Capture', self)
-        self.btn_T1125.clicked.connect(self.video_capture)
-        self.btn_T1125.resize(self.btn_T1125.sizeHint())
-        self.btn_T1125.move(50, 350)
+        main_layout = QVBoxLayout()
+        button_layout = QVBoxLayout()
+        control_layout = QVBoxLayout()
 
-        self.STOP = QPushButton('Stop', self)
-        self.STOP.clicked.connect(self.stop)
-        self.STOP.resize(self.STOP.sizeHint())
-        self.STOP.move(50, 380)
+        button_data = [
+            ('System Information', self.gather_system_info),
+            ('CMD', self.command_line_interface),
+            ('File And Directory Discovery', self.file_and_directory_discovery),
+            ('Remote File Copy', self.remote_file_copy),
+            ('File Deletion', self.file_deletion),
+            ('Process Discovery', self.process_discovery),
+            ('Input Capture', self.input_capture),
+            ('Clipboard Data', self.clipboard_data),
+            ('Screen Capture', self.screen_capture),
+            ('Audio Capture', self.audio_capture),
+            ('Video Capture', self.video_capture),
+            ('Stop', self.stop), 
+            ('Listen', self.establish_connection)
+        ]
 
-        self.btn_Listen = QPushButton('Listen', self)
-        self.btn_Listen.clicked.connect(self.establish_connection)
-        self.btn_Listen.resize(self.btn_Listen.sizeHint())
-        self.btn_Listen.move(250, 210)
+        for text, function in button_data:
+            button = QPushButton(text)
+            button.clicked.connect(function)
 
-        self.TextBox = QLineEdit(self)
-        self.TextBox.move(250, 50)
-        self.TextBox.resize(300, 150)
-        self.TextBox.setText("Type here port to listen and press button 'Listen'")
+            button.setStyleSheet("QPushButton {"
+                                 "   background-color: #4CAF50;"
+                                 "   color: white;"
+                                 "   border: 1px solid #4CAF50;"
+                                 "   border-radius: 4px;"
+                                 "   padding: 5px;"
+                                 "   min-width: 100px;"
+                                 "}"
+                                 "QPushButton:hover {"
+                                 "   background-color: #45a049;"
+                                 "   border: 1px solid #45a049;"
+                                 "}"
+                                 "QPushButton:pressed {"
+                                 "   background-color: #3c883b;"
+                                 "   border: 1px solid #3c883b;"
+                                 "}")
 
-        self.label = QLabel("There is would be your program feedback", self)
-        self.label.move(250, 300)
-        self.label.resize(300, 150)
-        self.label.setWordWrap(False)
+            button_layout.addWidget(button)
+
+        self.TextBox = QLineEdit()
+        self.label = QLabel("There is would be your program feedback")
+
+        self.TextBox.setStyleSheet("QLineEdit {"
+                                  "   background-color: #ffffff;"
+                                  "   border: 1px solid #4CAF50;"
+                                  "   padding: 5px;"
+                                  "}")
+
+        self.label.setStyleSheet("QLabel {"
+                                 "   color: #4CAF50;"
+                                 "}")
+
+        control_layout.addWidget(self.TextBox)
+        control_layout.addWidget(self.label)
+
+        main_layout.addLayout(button_layout)
+        main_layout.addLayout(control_layout)
+
+        self.setLayout(main_layout)
+
+        self.setStyleSheet("QWidget {"
+                           "   background-color: #f0f0f0;"
+                           "}")
 
         self.setGeometry(300, 300, 800, 600)
         self.setWindowTitle('Server')
         self.show()
+
 
     def establish_connection(self):
         try:
@@ -96,7 +100,6 @@ class Server(QWidget):
             self.label.setText(f"Os is: {self.operation_system}")
         except Exception as e:
             pass
-
 
     def gather_system_info(self):
         self.connection.send(b"1")
