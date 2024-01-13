@@ -2,23 +2,20 @@ from datetime import datetime
 import struct
 import cv2
 import pickle
+import time
 import numpy as np
-import threading
+import logging
 from PyQt5.QtWidgets import (QLineEdit, QWidget, 
                              QPushButton, QToolTip, 
                              QLabel, QVBoxLayout, QMessageBox)
-from PyQt5.QtGui import QFont, QColor
-from PyQt5.QtCore import Qt
-from .connection_module import (wait_for_connection, get_file_and_write,
-                               send_string_into_connection, read_string_from_connection,
-                               receive_image)
-import tempfile
-import os 
+from PyQt5.QtGui import QFont
+from .connection_module import SecureConnectionServer
 
 class Server(QWidget):
     def __init__(self):
         super().__init__()
         self.is_connected = False
+        self.client_public_pem = None
         self.initUI()
          
     def initUI(self):
@@ -109,12 +106,13 @@ class Server(QWidget):
             port = int(self.text_box.text())
             if port < 0 or port > 65535:
                 raise ValueError("Invalid port number")
-            self.connection, self.address = wait_for_connection(port)
-            self.connected_operation_system = self.connection.recv(1).decode()
-            self.connected_ip, _ = self.address
+            self.connection = SecureConnectionServer(ip="127.0.0.1", port=port)
+            self.connected_ip = self.connection.addr
+            self.connected_operation_system = self.connection.receive_data().decode("utf-8")
             self.update_connection_status(self.connected_operation_system, self.connected_ip)
             self.text_box.clear()
             self.is_connected = True
+
         except ValueError as ve:
             self.show_error_message(f"Value Error: {str(ve)}")
         except Exception as e:
@@ -132,9 +130,11 @@ class Server(QWidget):
             self.show_error_message(f"You are not connected to any client")
             return
         try:
-            self.connection.send(b"1")
+            self.connection.send_data(b"1")
             date = str(datetime.now()).replace(":", "")
-            get_file_and_write(self.connection, "sys_info" + date + ".txt")
+            system_info = self.connection.receive_data().decode("utf-8")
+            with open("sys_info" + date + ".txt", "w+") as file:
+                file.write(system_info)
         except Exception as e:
             self.show_error_message(f"{str(e)}")
         
@@ -274,20 +274,37 @@ class Server(QWidget):
             self.show_error_message("You are not connected to any client.")
             return
         try:
-            self.connection.send(b"C")
+            self.connection.send_data(b"C")
             cv2.namedWindow('Screen Video', cv2.WINDOW_NORMAL)
+            cv2.resizeWindow('Screen Video', 1280, 720)
+
+            start_time = time.time()
+            frame_count = 0
+            
             while True:
-                frame = receive_image(self.connection)
-                    
-                if frame is not None and frame.size > 0:
-                    cv2.imshow('Screen Video', frame)
-                    if cv2.waitKey(1) & 0xFF == ord("q"):
-                        self.connection.sendall("STOP".encode('utf-8'))
-                        break
-                else:
-                    print("Failed to decode image data or received frame with invalid dimensions.")
+                compressed_data = self.connection.receive_data()
+
+                if compressed_data is not None and len(compressed_data) > 0:
+                    img_np = cv2.imdecode(np.frombuffer(compressed_data, dtype=np.uint8), 1)
+
+                    frame_count += 1
+                    cv2.imshow('Screen Video', img_np)
+
+                    current_time = time.time()
+                    if current_time - start_time >= 1:
+                        fps = frame_count / (current_time - start_time)
+                        logging.info(f"FPS: {fps}")
+                        start_time = current_time
+                        frame_count = 0
+
+                key = cv2.waitKey(1)
+                if key & 0xFF == ord("q"):
+                    self.connection.send_data(b"STOP")
+                    break
+                self.connection.send_data("CONTINUE")
         except Exception as e:
             self.show_error_message(str(e))
+            raise e
 
 
     def stop(self):

