@@ -15,7 +15,6 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 DEFAULT_BUFFER_SIZE = 1024
-DEFAULT_SOCKET_TIMEOUT = 240
 DEFAULT_KEY_SIZE = 2048
 
 logging.basicConfig(level=logging.INFO,
@@ -71,7 +70,6 @@ class SecureConnectionFramework:
         try:
             logging.info("Initializing socket")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(DEFAULT_SOCKET_TIMEOUT)
             logging.info("Socket created successfully")
         except Exception as e:
             logging.error(f"Error initializing TCP socket: {e}")
