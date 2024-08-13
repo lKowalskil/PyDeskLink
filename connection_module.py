@@ -4,7 +4,6 @@ import struct
 import base64
 import os
 import sys
-import struct
 import time
 import hashlib
 from cryptography.hazmat.primitives import serialization, hashes
@@ -15,7 +14,9 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 DEFAULT_BUFFER_SIZE = 1024
-DEFAULT_KEY_SIZE = 2048
+IV_SIZE = 16
+RSA_KEY_SIZE = 2048
+AES_KEY_SIZE = 32
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -46,7 +47,7 @@ class SecureConnectionFramework:
     def generate_rsa_keys(self):
         private_key = rsa.generate_private_key(
             public_exponent=65537,
-            key_size=2048,
+            key_size=RSA_KEY_SIZE,
             backend=default_backend()
         )
         public_key = private_key.public_key()
@@ -64,7 +65,7 @@ class SecureConnectionFramework:
         return private_key, public_key, private_key_pem, public_key_pem
 
     def generate_aes_key(self):
-        return os.urandom(32)
+        return os.urandom(AES_KEY_SIZE)
 
     def initialize_socket(self):
         try:
@@ -141,7 +142,7 @@ class SecureConnectionFramework:
 
     def send_data_AES(self, data: bytes):
         try:
-            iv = os.urandom(16)
+            iv = os.urandom(IV_SIZE)
             padder = PKCS7(algorithms.AES.block_size).padder()
             padded_data = padder.update(data) + padder.finalize()
             logging.info(f"Padded data size (before encryption): {len(padded_data)}")
@@ -156,7 +157,6 @@ class SecureConnectionFramework:
             message = iv + packed_size + encrypted_data
             logging.info(f"Sending message of size: {len(message)}")
                 
-            logging.debug(f"Sent IV: {iv}")
             logging.debug(f"Sent data: {encrypted_data}")
             if self.conn:
                 self.conn.sendall(message)
@@ -183,7 +183,6 @@ class SecureConnectionFramework:
             else:
                 raise Exception("No valid socket connection available")
 
-            logging.debug(f"IV: {iv}")
             logging.debug(f"Packed size: {packed_size}")
             logging.info(f"Unpacked size: {size}")
             logging.info(f"Encrypted data size: {len(encrypted_data)}")
@@ -212,7 +211,7 @@ class SecureConnectionFramework:
             self.conn.close()
 
 class SecureConnectionClient(SecureConnectionFramework):
-    def __init__(self, server_ip: str, server_port: int, key_size: int = DEFAULT_KEY_SIZE):
+    def __init__(self, server_ip: str, server_port: int, key_size: int = RSA_KEY_SIZE):
         logging.info("Initializing SecureConnectionClient")
         super().__init__()
 
@@ -225,7 +224,7 @@ class SecureConnectionClient(SecureConnectionFramework):
             raise e
 
 class SecureConnectionServer(SecureConnectionFramework):
-    def __init__(self, ip: str, port: int, key_size: int = DEFAULT_KEY_SIZE):
+    def __init__(self, ip: str, port: int, key_size: int = RSA_KEY_SIZE):
         logging.info("Initializing SecureConnectionServer")
         super().__init__()
 

