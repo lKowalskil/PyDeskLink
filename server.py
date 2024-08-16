@@ -12,6 +12,7 @@ import os
 import json
 import threading
 import pyaudio
+import qdarkstyle
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtWidgets import (QLineEdit, QWidget, 
                              QPushButton,
@@ -20,9 +21,9 @@ from PyQt5.QtWidgets import (QLineEdit, QWidget,
                              QScrollBar, QDialog,
                              QTableWidget, QTableWidgetItem, 
                              QHeaderView, QFileDialog, QListWidget,
-                             QProgressBar)
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import pyqtSignal, QObject, QThread, pyqtSlot
+                             QProgressBar, QHBoxLayout, QSpacerItem, QSizePolicy)
+from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import pyqtSignal, QObject, QThread, pyqtSlot, Qt
 from connection_module import SecureConnectionServer
 
 start_port, end_port = 50000, 50100
@@ -55,22 +56,11 @@ class ScrollableTextInfo(QWidget):
         layout = QVBoxLayout()
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
-        self.text_edit.setStyleSheet("""
-            QTextEdit {
-                background-color: #f0f0f0;
-                font-family: 'Arial';
-                font-size: 14px;
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
         self.scroll_bar = QScrollBar()
         layout.addWidget(self.text_edit)
         self.setLayout(layout)
         self.setGeometry(300, 300, 400, 300)
         self.setWindowTitle('Scrollable Text Info')
-        self.setStyleSheet("background-color: #e0e0e0;")
 
     def set_text(self, text):
         self.text_edit.setPlainText(text)
@@ -86,42 +76,9 @@ class CommandLineWindow(QDialog):
         layout = QVBoxLayout()
         self.output_text_edit = QTextEdit()
         self.output_text_edit.setReadOnly(True)
-        self.output_text_edit.setStyleSheet("""
-            QTextEdit {
-                background-color: #f0f0f0;
-                font-family: 'Arial';
-                font-size: 14px;
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
         self.input_line_edit = QLineEdit()
         self.input_line_edit.setPlaceholderText("Enter command")
-        self.input_line_edit.setStyleSheet("""
-            QLineEdit {
-                background-color: #fff;
-                font-family: 'Arial';
-                font-size: 14px;
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
         execute_button = QPushButton("Execute")
-        execute_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007BFF;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 10px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-        """)
         execute_button.clicked.connect(self.execute_command)
         layout.addWidget(self.output_text_edit)
         layout.addWidget(self.input_line_edit)
@@ -179,24 +136,10 @@ class ClientMonitorWindow(QWidget):
         self.table_widget.setColumnCount(8)
         self.table_widget.setHorizontalHeaderLabels(["ID", "Connected", "IP", "Country", "OS", "Last Active", "Full System Info", "Use"])
         self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table_widget.setStyleSheet("""
-            QTableWidget {
-                background-color: #f0f0f0;
-                font-family: 'Arial';
-                font-size: 14px;
-                border: 1px solid #ccc;
-                border-radius: 8px;
-            }
-            QHeaderView::section {
-                background-color: #007BFF;
-                color: white;
-            }
-        """)
         layout.addWidget(self.table_widget)
         self.setLayout(layout)
         self.setWindowTitle('Client Monitor')
-        self.setGeometry(100, 100, 800, 600)
-        self.setStyleSheet("background-color: #e0e0e0;")
+        self.setGeometry(100, 100, 1280, 720)
 
         self.server_thread = QThread()
         self.server_worker = Worker()
@@ -242,34 +185,10 @@ class ClientMonitorWindow(QWidget):
         self.table_widget.setItem(row_position, 5, QTableWidgetItem(last_active))
 
         info_button = QPushButton("Info")
-        info_button.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-        """)
         info_button.clicked.connect(lambda _, info=full_system_info: self.show_info_popup(info))
         self.table_widget.setCellWidget(row_position, 6, info_button)
 
         connect_button = QPushButton("Connect")
-        connect_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007BFF;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-        """)
         connect_button.clicked.connect(lambda: self.connect(client_id))
         self.table_widget.setCellWidget(row_position, 7, connect_button)
 
@@ -470,11 +389,23 @@ class Server(QWidget):
         self.file_browser_window.show()
     
     def initUI(self):
-        self.setWindowTitle('Server')
-        self.setGeometry(300, 300, 500, 700)
+        self.setWindowTitle('Server Control Panel')
+        self.setGeometry(300, 300, 400, 600)
+        
+        # Main layout
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+        # Title label
+        title_label = QLabel("Server Operations")
+        title_label.setFont(QFont('Arial', 16))
+        title_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title_label)
+        
+        # Button layout
         button_layout = QVBoxLayout()
-        control_layout = QVBoxLayout()
+        button_layout.setSpacing(10)
 
         button_data = [
             ('System Information', self.gather_system_info, 'info.png'),
@@ -492,45 +423,35 @@ class Server(QWidget):
         for text, function, icon in button_data:
             button = QPushButton(text)
             button.setIcon(QIcon(f'icons/{icon}'))
-            button.setStyleSheet("""
-                QPushButton {
-                    background-color: #007BFF;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    padding: 10px;
-                    font-size: 14px;
-                }
-                QPushButton:hover {
-                    background-color: #0056b3;
-                }
-            """)
+            button.setMinimumHeight(40)  # Ensure consistent button size
             button.clicked.connect(function)
             button_layout.addWidget(button)
 
-        self.connection_status_label = QLabel("Not connected")
-        self.connection_status_label.setStyleSheet("""
-            QLabel {
-                background-color: #fff;
-                border: 1px solid #007BFF;
-                border-radius: 8px;
-                padding: 10px;
-                font-size: 14px;
-            }
-        """)
-        control_layout.addWidget(self.connection_status_label)
         main_layout.addLayout(button_layout)
-        main_layout.addLayout(control_layout)
+
+        # Add spacer to push connection status to the bottom
+        main_layout.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding))
+        
+        # Connection status layout
+        connection_status_layout = QHBoxLayout()
+        connection_status_label = QLabel("Status: ")
+        connection_status_label.setFont(QFont('Arial', 12))
+
+        self.connection_status = QLabel("Not connected")
+        self.connection_status.setFont(QFont('Arial', 12))
+        self.connection_status.setStyleSheet("color: red;")
+
+        connection_status_layout.addWidget(connection_status_label)
+        connection_status_layout.addWidget(self.connection_status)
+        connection_status_layout.addStretch()
+
+        main_layout.addLayout(connection_status_layout)
+
         self.setLayout(main_layout)
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #f8f9fa;
-            }
-        """)
 
     def update_connection_status(self, os, ip):
         status_text = f"Connected: {os}, IP: {ip}"
-        self.connection_status_label.setText(status_text)
+        self.connection_status.setText(status_text)
 
     def show_error_message(self, error_text):
         error_box = QMessageBox()
@@ -688,8 +609,12 @@ class Server(QWidget):
         except Exception as e:
             self.show_error_message(f"{str(e)}")       
 
+os.environ['PYQTGRAPH_QT_LIB'] = 'PyQt5'
+
 def main():
     app = QApplication([])
+    app.setStyleSheet(qdarkstyle.load_stylesheet_pyqt5())
+    app.setStyleSheet(qdarkstyle.load_stylesheet(qt_api='pyqt5'))
     server = ClientMonitorWindow()
     server.show()
     return app.exec_()

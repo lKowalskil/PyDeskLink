@@ -1,11 +1,8 @@
 import socket
 import logging
 import struct
-import base64
 import os
-import sys
-import time
-import hashlib
+from typing import Optional
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.padding import PKCS7
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -18,14 +15,15 @@ IV_SIZE = 16
 RSA_KEY_SIZE = 2048
 AES_KEY_SIZE = 32
 
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        logging.FileHandler("connection_module.log"),
-                        logging.StreamHandler(sys.stdout)
-                    ])
+logger = logging.getLogger('connection_module')
+logger.setLevel(logging.CRITICAL)
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.CRITICAL)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
-def recv_all(sock, length):
+def recv_all(sock: socket, length: int) -> bytes:
     data = b''
     while len(data) < length:
         more_data = sock.recv(length - len(data))
@@ -38,13 +36,13 @@ class SecureConnectionFramework:
     def __init__(self):
         self.my_private_key_RSA, self.my_public_key_RSA, self.my_private_key_pem, self.my_public_key_pem = self.generate_rsa_keys()
         self.my_symmetric_key_AES = self.generate_aes_key()
-        self.socket = None
-        self.connected = False
-        self.other_public_key_RSA = None
-        self.conn = None
+        self.socket: Optional[socket.socket] = None
+        self.connected: bool = False
+        self.other_public_key_RSA: rsa.RSAPublicKey = None
+        self.conn: Optional[socket.socket] = None
         self.initialize_socket()
 
-    def generate_rsa_keys(self):
+    def generate_rsa_keys(self) -> tuple[rsa.RSAPrivateKey, rsa.RSAPublicKey, bytes, bytes]:
         private_key = rsa.generate_private_key(
             public_exponent=65537,
             key_size=RSA_KEY_SIZE,
@@ -64,10 +62,10 @@ class SecureConnectionFramework:
         )
         return private_key, public_key, private_key_pem, public_key_pem
 
-    def generate_aes_key(self):
+    def generate_aes_key(self) -> bytes:
         return os.urandom(AES_KEY_SIZE)
 
-    def initialize_socket(self):
+    def initialize_socket(self) -> None:
         try:
             logging.info("Initializing socket")
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -76,7 +74,7 @@ class SecureConnectionFramework:
             logging.error(f"Error initializing TCP socket: {e}")
             raise e
 
-    def start_connection(self, server_ip: str, server_port: int):
+    def start_connection(self, server_ip: str, server_port: int) -> None:
         try:
             logging.info(f"Connecting to server {server_ip}:{server_port}")
             self.socket.connect((server_ip, server_port))
@@ -94,7 +92,7 @@ class SecureConnectionFramework:
             logging.error(f"Error during key exchange: {e}")
             raise e
 
-    def exchange_keys_RSA(self, sock, public_key_pem):
+    def exchange_keys_RSA(self, sock: socket.socket, public_key_pem: bytes) -> Optional[rsa.RSAPublicKey]:
         try:
             sock.sendall(public_key_pem)
             received_public_key_pem = sock.recv(DEFAULT_BUFFER_SIZE)
@@ -109,7 +107,7 @@ class SecureConnectionFramework:
             logging.error(f"Error while exchanging RSA keys: {e}")
             raise e
 
-    def send_AES_key(self, sock, key):
+    def send_AES_key(self, sock: socket.socket, key: bytes) -> None:
         logging.info("Encrypting AES key for sending")
         encrypted_key = self.other_public_key_RSA.encrypt(
             key,
@@ -124,7 +122,7 @@ class SecureConnectionFramework:
         sock.sendall(encrypted_key)
         logging.info("AES key sent successfully")
 
-    def receive_AES_key(self, sock):
+    def receive_AES_key(self, sock: socket.socket) -> None:
         received_encrypted_key = sock.recv(256)
         logging.info(f"Received encrypted AES key: {received_encrypted_key}")
         if not received_encrypted_key:
@@ -140,7 +138,7 @@ class SecureConnectionFramework:
         )
         self.my_symmetric_key_AES = decrypted_key
 
-    def send_data_AES(self, data: bytes):
+    def send_data_AES(self, data: bytes) -> None:
         try:
             iv = os.urandom(IV_SIZE)
             padder = PKCS7(algorithms.AES.block_size).padder()
@@ -168,7 +166,7 @@ class SecureConnectionFramework:
             logging.error(f"Error while sending data: {e}")
             raise e
 
-    def receive_data_AES(self):
+    def receive_data_AES(self) -> bytes:
         try:
             if self.conn:
                 iv = recv_all(self.conn, 16)
@@ -204,14 +202,14 @@ class SecureConnectionFramework:
             logging.error(f"Error while receiving data: {e}")
             raise e
 
-    def close(self):
+    def close(self) -> None:
         if self.socket:
             self.socket.close()
         if self.conn:
             self.conn.close()
 
 class SecureConnectionClient(SecureConnectionFramework):
-    def __init__(self, server_ip: str, server_port: int, key_size: int = RSA_KEY_SIZE):
+    def __init__(self, server_ip: str, server_port: int):
         logging.info("Initializing SecureConnectionClient")
         super().__init__()
 
@@ -224,7 +222,7 @@ class SecureConnectionClient(SecureConnectionFramework):
             raise e
 
 class SecureConnectionServer(SecureConnectionFramework):
-    def __init__(self, ip: str, port: int, key_size: int = RSA_KEY_SIZE):
+    def __init__(self, ip: str, port: int):
         logging.info("Initializing SecureConnectionServer")
         super().__init__()
 
@@ -236,7 +234,7 @@ class SecureConnectionServer(SecureConnectionFramework):
             logging.error(f"Error initializing SecureConnectionServer: {e}")
             raise e
 
-    def listen_for_clients(self, ip, port):
+    def listen_for_clients(self, ip: str, port: int) -> None:
         try:
             self.socket.bind((ip, port))
             self.socket.listen(5)
